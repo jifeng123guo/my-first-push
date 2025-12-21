@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Christmas Tree XR - Enhanced</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
+        
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        #camera-preview {
+            position: absolute; bottom: 20px; right: 20px;
+            width: 160px; height: 120px;
+            z-index: 20;
+            border: 2px solid #ffd700;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
+        }
+        #video-input { 
+            width: 100%; height: 100%; 
+            object-fit: cover; 
+            transform: scaleX(-1);
+        }
+
+        #status-panel {
+            position: absolute; top: 20px; right: 20px; 
+            text-align: right; pointer-events: none; z-index: 20;
+            color: rgba(255,255,255,0.8);
+            text-shadow: 0 0 5px #000;
+        }
+        .highlight { color: #ffd700; font-weight: bold; }
+
+        #countdown-overlay { 
+            position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%);
+            display: none; flex-direction: column; align-items: center;
+            z-index: 30; pointer-events: none;
+        }
+        #countdown-num { font-size: 80px; color: #fff; font-weight: 900; text-shadow: 0 0 20px #f00; }
+        #gesture-bar-bg {
+            width: 150px; height: 10px; background: rgba(255,255,255,0.3);
+            border-radius: 5px; margin-top: 10px; overflow: hidden;
+        }
+        #gesture-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.1s linear; }
+        
+        /* 新增：缩放倍数指示器 */
+        #zoom-indicator {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #00aaff; font-size: 32px; font-weight: bold; 
+            text-shadow: 0 0 15px #00aaff; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none; z-index: 25;
+            letter-spacing: 2px;
+        }
+
+        #flash {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; opacity: 0; pointer-events: none; z-index: 100;
+            transition: opacity 0.5s ease-out;
+        }
+
+        #start-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, #1a1a1a 0%, #000 100%);
+            z-index: 50; display: flex; flex-direction: column; 
+            justify-content: center; align-items: center; color: white;
+            transition: opacity 0.8s;
+            overflow-y: auto; /* 防止内容过长无法滚动 */
+            padding: 20px 0;
+        }
+        .btn {
+            background: #c62828; color: white; border: none;
+            padding: 15px 40px; font-size: 18px; border-radius: 50px;
+            cursor: pointer; box-shadow: 0 0 20px rgba(198, 40, 40, 0.5);
+            margin-top: 20px; transition: 0.3s;
+        }
+        .btn:hover { background: #ff1744; transform: scale(1.05); }
+        .file-upload {
+            border: 1px dashed #666; padding: 15px; border-radius: 8px;
+            cursor: pointer; color: #aaa; font-size: 14px;
+        }
+        .file-upload:hover { border-color: #ffd700; color: #fff; }
+
+        /* 新增：作者信息样式 */
+        .author-info {
+            margin-top: 30px;
+            background: rgba(255, 255, 255, 0.08);
+            padding: 20px 30px;
+            border-radius: 15px;
+            text-align: left;
+            border: 1px solid #444;
+            max-width: 90%;
+            width: 380px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .author-info h3 { 
+            margin: 0 0 15px 0; 
+            color: #ffd700; 
+            font-size: 16px; 
+            text-align: center; 
+            border-bottom: 1px solid rgba(255,215,0,0.3);
+            padding-bottom: 8px;
+        }
+        .social-link {
+            display: flex; align-items: center; margin: 10px 0; color: #ddd; text-decoration: none; font-size: 14px;
+            transition: color 0.2s, transform 0.2s;
+        }
+        .social-link:hover { color: #fff; transform: translateX(5px); }
+        .social-icon { margin-right: 10px; font-size: 18px; width: 20px; text-align: center; }
+
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    
+    <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="flash"></div>
+
+    <div id="start-overlay">
+        <h1 style="color:#ffd700; text-shadow:0 0 20px #f00; margin-bottom: 20px;">🎄 Christmas Tree XR</h1>
+        
+        <label class="file-upload">
+            <input type="file" id="music-upload" accept="audio/*" style="display:none;">
+            📂 点击加载音乐 (mp3) / Load Music
+        </label>
+        <div id="file-label" style="font-size:12px; margin-top:5px; color:#0f0; min-height:15px;"></div>
+        
+        <button class="btn" id="start-btn">开始体验 / Start</button>
+        
+        <div style="margin-top:20px; font-size:13px; color:#888; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:20px; text-align:center;">
+            <div>✌️<br>比"耶"2秒<br>拍摄挂件<br>Take Photo</div>
+            <div>👐<br>张开双手<br>放大查看<br>Scale Tree</div>
+            <div>🎵<br>播放音乐<br>律动灯光<br>Music Lights</div>
+        </div>
+
+        <!-- 作者信息区域 / Author Info -->
+        <div class="author-info">
+            <h3>Designed By</h3>
+            <a href="https://www.youtube.com/channel/UCSrCCPbtqpfobsC0uThogQA?sub_confirmation=1" target="_blank" class="social-link">
+                <span class="social-icon">📺</span> YouTube Channel
+            </a>
+            <a href="https://space.bilibili.com/493820858" target="_blank" class="social-link">
+                <span class="social-icon">📺</span> 哔哩哔哩 (Bilibili)
+            </a>
+            <div class="social-link">
+                <span class="social-icon">🎵</span> 抖音: zhuifengxing87
+            </div>
+            <div class="social-link">
+                <span class="social-icon">💬</span> WeChat: GuoDaYe_Cunkou
+            </div>
+        </div>
+    </div>
+
+    <div id="status-panel">
+        <div>High Pitch: <span id="st-high" class="highlight">0%</span></div>
+        <div>Bass: <span id="st-bass" class="highlight">0%</span></div>
+        <div>Photos: <span id="st-photos" class="highlight">0</span></div>
+    </div>
+
+    <div id="countdown-overlay">
+        <div id="countdown-num">3</div>
+        <div id="gesture-bar-bg"><div id="gesture-bar"></div></div>
+    </div>
+
+    <!-- 缩放指示器 -->
+    <div id="zoom-indicator">Zoom x1.0</div>
+
+    <div id="camera-preview">
+        <video id="video-input" playsinline webkit-playsinline></video>
+    </div>
+    
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        // --- Config ---
+        const CONFIG = {
+            particleCount: 12000,
+            lightCount: 800,
+            snowCount: 2000,
+            colors: [
+                new THREE.Color(0xff0000),
+                new THREE.Color(0xffd700),
+                new THREE.Color(0x00ff00),
+                new THREE.Color(0x00aaff),
+                new THREE.Color(0xffffff)
+            ]
+        };
+
+        // --- Globals ---
+        let scene, camera, renderer, composer;
+        let treeGroup, photoGroup, lightPoints, snowSystem;
+        let clock = new THREE.Clock();
+        
+        let player, analyzer;
+        let audioData = { bass: 0, treble: 0 };
+
+        let handState = {
+            left: null, right: null,
+            victoryTimer: 0,
+            isVictory: false
+        };
+        let targetScale = 1;
+        let autoRotateSpeed = 0.2;
+
+        const elVideo = document.getElementById('video-input');
+        const elFlash = document.getElementById('flash');
+        const elZoom = document.getElementById('zoom-indicator');
+
+        // --- Audio ---
+        async function initAudio(file) {
+            await Tone.start();
+            const url = file ? URL.createObjectURL(file) : "https://actions.google.com/sounds/v1/holidays/jingle_bells_medium_tempo.ogg";
+            player = new Tone.Player(url).toDestination();
+            player.loop = true;
+            player.autostart = true;
+            analyzer = new Tone.Analyser("fft", 64);
+            player.connect(analyzer);
+        }
+
+        // --- Scene ---
+        function initScene() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x020202, 0.02);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 3, 9);
+
+            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Bloom
+            const renderScene = new RenderPass(scene, camera);
+            const bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight), 
+                1.5, 0.4, 0.85
+            );
+            bloomPass.threshold = 0.2;
+            bloomPass.strength = 1.3;
+            bloomPass.radius = 0.5;
+
+            composer = new EffectComposer(renderer);
+            composer.addPass(renderScene);
+            composer.addPass(bloomPass);
+
+            createTree();
+            createSnow();
+
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.enablePan = false;
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                composer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function createTree() {
+            treeGroup = new THREE.Group();
+            photoGroup = new THREE.Group();
+            treeGroup.add(photoGroup);
+            scene.add(treeGroup);
+
+            // 1. Needles
+            const geo = new THREE.BufferGeometry();
+            const pos = [];
+            const col = [];
+            for(let i=0; i<CONFIG.particleCount; i++){
+                const h = Math.random() * 5; 
+                const maxR = 2.2 * (1 - h/5.5);
+                const r = maxR * Math.sqrt(Math.random());
+                const angle = Math.random() * Math.PI * 2;
+                pos.push(Math.cos(angle)*r, h - 2.5, Math.sin(angle)*r);
+                
+                const c = new THREE.Color(0x0f5e28).offsetHSL(Math.random()*0.1, 0, (Math.random()-0.5)*0.2);
+                col.push(c.r, c.g, c.b);
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+            
+            treeGroup.add(new THREE.Points(geo, new THREE.PointsMaterial({
+                size: 0.04, vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.NormalBlending
+            })));
+
+            // 2. Rhythm Lights
+            const lGeo = new THREE.BufferGeometry();
+            const lPos = [];
+            const lType = [];
+            const lOffset = [];
+            for(let i=0; i<CONFIG.lightCount; i++){
+                const h = Math.random() * 5;
+                const r = (2.2 * (1 - h/5.5)) + 0.1; 
+                const angle = Math.random() * Math.PI * 2;
+                lPos.push(Math.cos(angle)*r, h - 2.5, Math.sin(angle)*r);
+                lType.push(Math.floor(Math.random() * 5));
+                lOffset.push(Math.random() * 10);
+            }
+            lGeo.setAttribute('position', new THREE.Float32BufferAttribute(lPos, 3));
+            lGeo.setAttribute('type', new THREE.Float32BufferAttribute(lType, 1));
+            lGeo.setAttribute('offset', new THREE.Float32BufferAttribute(lOffset, 1));
+
+            const lMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    bass: { value: 0 },
+                    treble: { value: 0 },
+                    c0: { value: CONFIG.colors[0] },
+                    c1: { value: CONFIG.colors[1] },
+                    c2: { value: CONFIG.colors[2] },
+                    c3: { value: CONFIG.colors[3] },
+                    c4: { value: CONFIG.colors[4] },
+                    tex: { value: new THREE.TextureLoader().load('https://threejs.org/examples/textures/sprites/spark1.png') }
+                },
+                vertexShader: `
+                    attribute float type; attribute float offset;
+                    varying vec3 vColor; varying float vAlpha;
+                    uniform float time; uniform float bass; uniform float treble;
+                    uniform vec3 c0; uniform vec3 c1; uniform vec3 c2; uniform vec3 c3; uniform vec3 c4;
+                    void main() {
+                        if(type < 0.5) vColor = c0;
+                        else if(type < 1.5) vColor = c1;
+                        else if(type < 2.5) vColor = c2;
+                        else if(type < 3.5) vColor = c3;
+                        else vColor = c4;
+                        
+                        float blink = sin(time * 3.0 + offset);
+                        float size = 0.12 + (bass * 0.2) + (blink * 0.02);
+                        vAlpha = 0.7 + (bass * 0.3) + (blink * 0.2);
+                        
+                        if(treble > 0.6) {
+                            vColor = mix(vColor, vec3(1.0), 0.8);
+                            size *= 1.4;
+                            vAlpha = 1.0;
+                        }
+                        
+                        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                        gl_PointSize = size * (300.0 / -mv.z);
+                        gl_Position = projectionMatrix * mv;
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D tex; varying vec3 vColor; varying float vAlpha;
+                    void main() { gl_FragColor = vec4(vColor, vAlpha) * texture2D(tex, gl_PointCoord); }
+                `,
+                blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
+            });
+            lightPoints = new THREE.Points(lGeo, lMat);
+            treeGroup.add(lightPoints);
+
+            // 3. Star
+            const star = new THREE.Mesh(
+                new THREE.OctahedronGeometry(0.25, 0), 
+                new THREE.MeshBasicMaterial({color: 0xffd700})
+            );
+            star.position.y = 2.6;
+            treeGroup.add(star);
+        }
+
+        function createSnow() {
+            const geo = new THREE.BufferGeometry();
+            const pos = [];
+            for(let i=0; i<CONFIG.snowCount; i++) {
+                pos.push((Math.random()-0.5)*20, Math.random()*20, (Math.random()-0.5)*20);
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            
+            snowSystem = new THREE.Points(geo, new THREE.PointsMaterial({
+                color: 0xffffff, size: 0.05, transparent: true, opacity: 0.7,
+                map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/sprites/snowflake1.png'),
+                blending: THREE.AdditiveBlending, depthWrite: false
+            }));
+            scene.add(snowSystem);
+        }
+
+        // --- Photo Function (修复过曝) ---
+        function takePhotoAndHang() {
+            if(!elVideo || elVideo.readyState < 2 || elVideo.videoWidth === 0) return;
+
+            const canvas = document.createElement('canvas');
+            const size = 512;
+            const border = 25;
+            canvas.width = size;
+            canvas.height = size + 80;
+            const ctx = canvas.getContext('2d', { willReadFrequently: false });
+
+            // Fix 1: 使用灰白色背景(#d0d0d0)而不是纯白，防止Bloom效果让照片边缘发光过强
+            ctx.fillStyle = "#d0d0d0"; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.save();
+            ctx.translate(size, 0);
+            ctx.scale(-1, 1);
+            
+            // Fix 2: 略微降低视频绘制亮度(0.9)，防止人脸过曝
+            ctx.filter = 'brightness(0.9)'; 
+            try {
+                ctx.drawImage(
+                    elVideo, 
+                    0, 0, elVideo.videoWidth, elVideo.videoHeight,
+                    border, border, size - border * 2, size - border * 2
+                );
+            } catch(e) {
+                console.error(e);
+            }
+            ctx.restore();
+
+            // Text
+            ctx.fillStyle = "#333";
+            ctx.font = "bold 40px Courier New";
+            ctx.textAlign = "center";
+            ctx.fillText("Merry Christmas!", size / 2, size + 55);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.needsUpdate = true;
+
+            // Fix 3: Material颜色调暗(0x999999)，模拟曝光补偿
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.5, 0.6),
+                new THREE.MeshBasicMaterial({ 
+                    map: tex, 
+                    side: THREE.DoubleSide,
+                    toneMapped: false,
+                    color: 0x999999 // 降低整体反光度
+                })
+            );
+
+            const h = Math.random() * 4;
+            const r = (2.2 * (1 - h / 5.5)) + 0.2;
+            const angle = Math.random() * Math.PI * 2;
+            mesh.position.set(Math.cos(angle) * r, h - 2.5, Math.sin(angle) * r);
+            mesh.lookAt(0, h - 2.5, 0);
+            mesh.rotation.y += Math.PI;
+            mesh.rotation.z = (Math.random() - 0.5) * 0.4;
+
+            if(photoGroup.children.length >= 15) {
+                photoGroup.remove(photoGroup.children[0]);
+            }
+            
+            photoGroup.add(mesh);
+            document.getElementById('st-photos').innerText = photoGroup.children.length;
+
+            elFlash.style.opacity = 1;
+            setTimeout(() => elFlash.style.opacity = 0, 400);
+        }
+
+        // --- Loop ---
+        function animate() {
+            const dt = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            if(analyzer) {
+                const data = analyzer.getValue();
+                let b = 0; for(let i = 1; i < 5; i++) b += data[i];
+                audioData.bass = Math.min(1, Math.max(0, (b / 4 + 100) / 40)); 
+                let t = 0; for(let i = 20; i < 32; i++) t += data[i];
+                let rawT = (t / 12 + 100) / 60; 
+                audioData.treble = rawT > 0.5 ? Math.pow(rawT, 3) : 0;
+                document.getElementById('st-bass').innerText = Math.round(audioData.bass * 100) + "%";
+                document.getElementById('st-high').innerText = Math.round(audioData.treble * 100) + "%";
+            }
+
+            if(lightPoints) {
+                lightPoints.material.uniforms.time.value = time;
+                lightPoints.material.uniforms.bass.value = audioData.bass;
+                lightPoints.material.uniforms.treble.value = audioData.treble;
+            }
+
+            if(snowSystem) {
+                const p = snowSystem.geometry.attributes.position.array;
+                for(let i = 1; i < p.length; i += 3) {
+                    p[i] -= 0.02 + (audioData.bass * 0.05);
+                    if(p[i] < -5) p[i] = 10;
+                }
+                snowSystem.geometry.attributes.position.needsUpdate = true;
+            }
+
+            // Gesture Timer
+            if(handState.isVictory && handState.victoryTimer >= 0) {
+                handState.victoryTimer += dt;
+                document.getElementById('countdown-overlay').style.display = 'flex';
+                document.getElementById('gesture-bar').style.width = (Math.min(1, handState.victoryTimer / 1.5) * 100) + "%";
+                document.getElementById('countdown-num').innerText = Math.ceil(1.5 - handState.victoryTimer);
+                
+                if(handState.victoryTimer >= 1.5) {
+                    takePhotoAndHang();
+                    handState.victoryTimer = -2.0;
+                    handState.isVictory = false;
+                }
+            } else {
+                document.getElementById('countdown-overlay').style.display = 'none';
+                if(handState.victoryTimer > 0) handState.victoryTimer = 0;
+                if(handState.victoryTimer < 0) handState.victoryTimer += dt;
+            }
+
+            // Scale & Rotate (优化放大逻辑)
+            if(handState.left && handState.right) {
+                const dist = Math.hypot(handState.left.x - handState.right.x, handState.left.y - handState.right.y);
+                
+                // 将最大缩放倍数从2.0增加到3.5，使照片查看更直观
+                // 双手距离 0.1 -> 缩放 0.5倍
+                // 双手距离 0.7 -> 缩放 3.5倍
+                const targetZ = THREE.MathUtils.mapLinear(dist, 0.1, 0.7, 0.5, 3.5);
+                targetScale = THREE.MathUtils.lerp(targetScale, targetZ, 0.1);
+
+                // 显示缩放倍数 UI
+                elZoom.style.opacity = 1;
+                elZoom.innerText = "Zoom x" + targetScale.toFixed(1);
+            } else {
+                targetScale = THREE.MathUtils.lerp(targetScale, 1.0, 0.05);
+                elZoom.style.opacity = 0;
+            }
+            treeGroup.scale.setScalar(targetScale);
+
+            if(handState.right && !handState.left) {
+                autoRotateSpeed = THREE.MathUtils.lerp(autoRotateSpeed, (handState.right.x - 0.5) * 4, 0.1);
+            } else {
+                autoRotateSpeed = THREE.MathUtils.lerp(autoRotateSpeed, 0.2, 0.05);
+            }
+            treeGroup.rotation.y += autoRotateSpeed * dt;
+
+            composer.render();
+            requestAnimationFrame(animate);
+        }
+
+        // --- MediaPipe ---
+        function detectVictory(lm) {
+            const dist = (i, j) => Math.hypot(lm[i].x - lm[j].x, lm[i].y - lm[j].y);
+            const idxOut = dist(8, 0) > dist(6, 0) * 1.1;
+            const midOut = dist(12, 0) > dist(10, 0) * 1.1;
+            const ringIn = dist(16, 0) < dist(14, 0);
+            const pinIn = dist(20, 0) < dist(18, 0);
+            const spread = dist(8, 12) > 0.04;
+            return idxOut && midOut && ringIn && pinIn && spread;
+        }
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+        hands.setOptions({ 
+            maxNumHands: 2, 
+            modelComplexity: 1, 
+            minDetectionConfidence: 0.6, 
+            minTrackingConfidence: 0.6 
+        });
+        
+        hands.onResults(results => {
+            handState.left = null; 
+            handState.right = null;
+            let v = false;
+            
+            if(results.multiHandLandmarks) {
+                results.multiHandLandmarks.forEach((lm, i) => {
+                    const lbl = results.multiHandedness[i].label;
+                    if(lbl === 'Left') handState.left = {x: lm[9].x, y: lm[9].y};
+                    if(lbl === 'Right') handState.right = {x: lm[9].x, y: lm[9].y};
+                    if(detectVictory(lm)) v = true;
+                });
+            }
+            
+            if(handState.victoryTimer >= 0) handState.isVictory = v;
+        });
+
+        // --- Start ---
+        const btn = document.getElementById('start-btn');
+        const fileIn = document.getElementById('music-upload');
+        let selFile = null;
+        
+        fileIn.addEventListener('change', e => {
+            if(e.target.files[0]) { 
+                selFile = e.target.files[0]; 
+                document.getElementById('file-label').innerText = selFile.name; 
+            }
+        });
+
+        btn.addEventListener('click', async () => {
+            btn.innerText = "Starting...";
+            
+            await initAudio(selFile);
+            
+            const cam = new Camera(elVideo, {
+                onFrame: async () => { 
+                    await hands.send({image: elVideo}); 
+                },
+                width: 640, 
+                height: 480
+            });
+            
+            await cam.start();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            initScene();
+            
+            document.getElementById('start-overlay').style.opacity = 0;
+            setTimeout(() => {
+                document.getElementById('start-overlay').style.display = 'none';
+            }, 800);
+            
+            animate();
+        });
+
+    </script>
+</body>
+</html>
